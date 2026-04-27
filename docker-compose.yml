@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  adyayam-api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - LLAMAPARSE_API_KEY=${LLAMAPARSE_API_KEY}
+      - APP_ENV=production
+    volumes:
+      - ./backend/pdfs:/app/pdfs
+      - ./backend/chroma_db:/app/chroma_db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - adyayam-api
+    restart: unless-stopped
