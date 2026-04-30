@@ -234,12 +234,12 @@ def validate_api_key(x_api_key: str = Header(..., description="Your Adyayam API 
     return {"key": x_api_key, **key_data}
 
 # ─────────────────────────────────────────────
-# CORE LLM CALL (calls Anthropic API)
+# CORE LLM CALL
 # ─────────────────────────────────────────────
 
 async def call_llm(messages: list, subject_context: str = "", mode: str = "concept") -> str:
     """
-    Core LLM call to Anthropic Claude API.
+    Core LLM call to Claude API.
     In production: also retrieves relevant chunks from vector DB first (RAG).
     """
     import anthropic
@@ -260,7 +260,7 @@ async def call_llm(messages: list, subject_context: str = "", mode: str = "conce
         model="claude-sonnet-4-5",
         max_tokens=2000,
         system=system,
-        messages=messages
+        messages=messages  # RAG injected above
     )
     
     return response.content[0].text
@@ -279,7 +279,7 @@ async def stream_llm(messages: list, subject_context: str = "", mode: str = "con
         model="claude-sonnet-4-5",
         max_tokens=2000,
         system=system,
-        messages=messages
+        messages=messages  # RAG injected above
     ) as stream:
         for text in stream.text_stream:
             yield f"data: {json.dumps({'delta': text})}\n\n"
@@ -335,7 +335,8 @@ async def ask(
         messages.append(msg)
     
     # Build context-aware user message
-    user_message = request.question
+    rag_context = retrieve_context(request.question, request.subject)
+    user_message = request.question + rag_context
     if request.difficulty and request.difficulty != "beginner":
         user_message = f"[{request.difficulty.upper()} LEVEL] {user_message}"
     if request.mode and request.mode != "concept":
@@ -566,3 +567,29 @@ async def get_usage(auth: dict = Depends(validate_api_key)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+
+# ─────────────────────────────────────────────
+# RAG RETRIEVER — connects ChromaDB to the API
+# ─────────────────────────────────────────────
+
+import chromadb as _chromadb
+
+_chroma_client = _chromadb.PersistentClient(path="./chroma_db")
+_collection = _chroma_client.get_collection("adyayam_ca_foundation")
+
+def retrieve_context(question: str, subject: str = None, top_k: int = 4) -> str:
+    """Retrieve relevant chunks from your PDFs"""
+    try:
+        where = {"subject": subject} if subject else None
+        results = _collection.query(
+            query_texts=[question],
+            n_results=top_k,
+            where=where
+        )
+        chunks = results['documents'][0]
+        if not chunks:
+            return ""
+        context = "\n\n---\n\n".join(chunks)
+        return f"\n\n## RELEVANT CONTENT FROM ADYAYAM STUDY MATERIAL:\n{context}\n\n"
+    except:
+        return ""
